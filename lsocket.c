@@ -30,23 +30,24 @@
 #include "lua.h"
 #include "lauxlib.h"
 
-#define LSOCKET_VERSION "1.0.2"
+#define LSOCKET_VERSION "1.1"
 
 #define LSOCKET "socket"
 #define TOSTRING_BUFSIZ 64
 #define READER_BUFSIZ 4096
 #define LSOCKET_EMPTY "lsocket_empty_table"
+/* address families */
 #define LSOCKET_INET "inet"
 #define LSOCKET_INET6 "inet6"
+/* socket types */
 #define LSOCKET_TCP "tcp"
 #define LSOCKET_UDP "udp"
 #define LSOCKET_MCAST "mcast"
+/* default TTL for multicast sockets */
 #define LSOCKET_DFLTTL 1
-
 /* default backlog for listening connections */
 #define DFL_BACKLOG 5
 
-/* this may need a little more sophistication, but seems to work ok */
 #if LUA_VERSION_NUM == 501
 #define luaL_newlib(L,funcs) lua_newtable(L); luaL_register(L, NULL, funcs)
 #define luaL_setfuncs(L,funcs,x) luaL_register(L, NULL, funcs)
@@ -220,6 +221,13 @@ static int _initsocket(lSocket *sock, int family, int type, int mcast, int proto
 
 	int on = 1;
 	setsockopt(sock->sockfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+	fcntl(sock->sockfd, F_SETFL, O_NONBLOCK);
+
+	#if defined(SO_NOSIGPIPE)
+	on = 1;
+	setsockopt(sock->sockfd, SOL_SOCKET, SO_NOSIGPIPE, (void *) &on, sizeof(on));
+	#endif
+
 	sock->family = family;
 	sock->type = type;
 	sock->mcast = mcast;
@@ -312,7 +320,7 @@ static int _needsnolookup(const char *addr)
  * 	port	port number for sockaddr
  * 	family	(out) address family (AF_INET or AF_INET6) of address
  * 	protocol	(out) protocol of address
- * 	sa	(out) pointer to struct sockaddr to wfill with data.
+ * 	sa	(out) pointer to struct sockaddr to fill with data.
  * 	slen	(inout)	length of sa, and on return length of data
  * 
  * Returns:
@@ -514,7 +522,7 @@ static int lsocket_connect(lua_State *L)
 			return lsocket_error(L, strerror(errno));
 	}
 	
-	if (connect(sock->sockfd, sa, slen) < 0)
+	if (connect(sock->sockfd, sa, slen) < 0 && errno != EINPROGRESS)
 		return lsocket_error(L, strerror(errno));
 
 	return 1;
@@ -539,6 +547,7 @@ static void _push_sockname(lua_State *L, struct sockaddr *sa)
 {
 	char buf[TOSTRING_BUFSIZ];
 	const char *s;
+	lua_newtable(L);
 	lua_pushliteral(L, "port");
 	lua_pushnumber(L, _portnumber(sa));
 	lua_rawset(L, -3);
@@ -580,9 +589,9 @@ static int lsocket_sock_info(lua_State *L)
 	struct sockaddr *sa = (struct sockaddr*) sabuf;
 	socklen_t slen = sizeof(sabuf);
 
-	lua_newtable(L);
-	
 	if (which == NULL) {
+		lua_newtable(L);
+
 		lua_pushliteral(L, "fd");
 		lua_pushnumber(L, sock->sockfd);
 		lua_rawset(L, -3);
@@ -613,21 +622,32 @@ static int lsocket_sock_info(lua_State *L)
 	} else if (!strcasecmp(which, "peer")) {
 		if (getpeername(sock->sockfd, sa, &slen) >= 0)
 			_push_sockname(L, sa);
-		else {
-			lua_pop(L, 1);
-			lua_pushnil(L);
-		}
+		else
+			return lsocket_error(L, strerror(errno));
 	} else if (!strcasecmp(which, "socket")) {
 		if (getsockname(sock->sockfd, sa, &slen) >= 0)
 			_push_sockname(L, sa);
-		else {
-			lua_pop(L, 1);
-			lua_pushnil(L);
-		}
+		else
+			return lsocket_error(L, strerror(errno));
 	} else {
 		lua_pop(L, 1);
 		lua_pushnil(L);
 	}
+	return 1;
+}
+
+static int lsocket_sock_status(lua_State *L)
+{
+	lSocket *sock = lsocket_checklSocket(L, 1);
+	int err;
+	socklen_t errl = sizeof(err);
+	if (getsockopt(sock->sockfd, SOL_SOCKET, SO_ERROR, &err, &errl) >= 0) {
+		if (err == 0)
+			lua_pushboolean(L, 1);
+		else
+			return lsocket_error(L, strerror(err));
+	} else
+		return lsocket_error(L, strerror(errno));
 	return 1;
 }
 
@@ -731,7 +751,7 @@ static int lsocket_sock_recv(lua_State *L)
 		return luaL_error(L, "bad argument #1 to 'recv' (invalid number)");
 	
 	char *buf = malloc(howmuch);
-	int nrd = recv(sock->sockfd, buf, howmuch, MSG_DONTWAIT);
+	int nrd = recv(sock->sockfd, buf, howmuch, 0);
 	if (nrd < 0) {
 		free(buf);
 		if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -778,7 +798,7 @@ static int lsocket_sock_recvfrom(lua_State *L)
 	struct sockaddr *sa = (struct sockaddr*) sabuf;
 	socklen_t slen = sizeof(sabuf);
 	char *buf = malloc(howmuch);
-	int nrd = recvfrom(sock->sockfd, buf, howmuch, MSG_DONTWAIT, sa, &slen);
+	int nrd = recvfrom(sock->sockfd, buf, howmuch, 0, sa, &slen);
 	if (nrd < 0) {
 		free(buf);
 		if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -824,8 +844,23 @@ static int lsocket_sock_send(lua_State *L)
 	size_t len;
 	const char *data = luaL_checklstring(L, 2, &len);
 	
-	int nwr = send(sock->sockfd, data, len, MSG_DONTWAIT);
-	
+	int flags = 0;
+	#if defined(MSG_NOSIGNAL)
+	flags = MSG_NOSIGNAL;
+	#elif !defined(SO_NOSIGPIPE)
+	struct sigaction sa_old, sa_new;
+	sa_new.sa_handler = SIG_IGN;
+	sa_new.sa_flags = 0;
+	sigemptyset(&sa_new.sa_mask);
+	sigaction(SIGPIPE, &sa_new, &sa_old);
+	#endif
+
+	int nwr = send(sock->sockfd, data, len, flags);
+
+	#if !defined(MSG_NOSIGNAL) && !defined(SO_NOSIGPIPE)
+	sigaction(SIGPIPE, &sa_old, NULL);
+	#endif
+		
 	if (nwr < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK)
 			lua_pushboolean(L, 0);
@@ -868,8 +903,23 @@ static int lsocket_sock_sendto(lua_State *L)
 
 	int err = _gethostaddr(L, addr, sock->type, port, &family, &protocol, sa, &slen);
 	if (err) return err;
-	
-	int nwr = sendto(sock->sockfd, data, len, MSG_DONTWAIT, sa, slen);
+
+	int flags = 0;
+	#if defined(MSG_NOSIGNAL)
+	flags = MSG_NOSIGNAL;
+	#elif !defined(SO_NOSIGPIPE)
+	struct sigaction sa_old, sa_new;
+	sa_new.sa_handler = SIG_IGN;
+	sa_new.sa_flags = 0;
+	sigemptyset(&sa_new.sa_mask);
+	sigaction(SIGPIPE, &sa_new, &sa_old);
+	#endif
+
+	int nwr = sendto(sock->sockfd, data, len, flags, sa, slen);
+
+	#if !defined(MSG_NOSIGNAL) && !defined(SO_NOSIGPIPE)
+	sigaction(SIGPIPE, &sa_old, NULL);
+	#endif
 	
 	if (nwr < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -914,6 +964,7 @@ static int lsocket_sock_close(lua_State *L)
  */
 static const struct luaL_Reg lSocket_methods [] ={
 	{"info", lsocket_sock_info},
+	{"status", lsocket_sock_status},
 	{"accept", lsocket_sock_accept},
 	{"recv", lsocket_sock_recv},
 	{"recvfrom", lsocket_sock_recvfrom},
@@ -973,7 +1024,7 @@ static int _table2fd_set(lua_State *L, int idx, fd_set *s)
  * 
  * Arguments:
  * 	L	Lua State
- * 	idx	index at which the table with the lSocket userdatas resides
+ * 	idx	index at which the table with the lSocket userdata resides
  * 	fd	file descriptor to search for
  * 
  * Returns:
@@ -1288,9 +1339,6 @@ int luaopen_lsocket(lua_State *L)
 	lua_pushvalue(L, -2);
 	lua_settable(L, LUA_REGISTRYINDEX);
 	lua_pop(L, 1);
-
-	/* if we don't ignore SIGPIPE, such a signal will just kill the application */
-	signal(SIGPIPE, SIG_IGN);
 
 	return 1;
 }

@@ -26,6 +26,13 @@ if not sock then
 	error(err)
 end
 
+-- wait for connect() to succeed or fail
+ls.select(nil, {sock})
+ok, err = sock:status()
+if not ok then
+	error(err)
+end
+
 rq = "GET " .. path .. " HTTP/1.1\r\n"
 rq = rq .. "Host: " .. host .. ":" .. port .. "\r\n"
 rq = rq .. "Connection: close\r\n"

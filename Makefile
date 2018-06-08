@@ -10,6 +10,7 @@ endif
 
 OS = $(shell uname -s)
 
+CC=gcc
 CFLAGS=-Wall -fPIC $(OPT) $(DBG)
 INCDIRS=-I/usr/local/include
 LIBDIRS=-L/usr/local/lib
@@ -17,6 +18,7 @@ LDFLAGS=-shared $(DBG)
 
 # OS specialities
 ifeq ($(OS),Darwin)
+	CC=cc
 	LDFLAGS=-bundle -undefined dynamic_lookup -all_load
 endif
 
@@ -25,10 +27,10 @@ all: lsocket.so
 debug:; make DEBUG=1
 
 lsocket.so: lsocket.o
-	gcc $(LDFLAGS) -o lsocket.so $(LIBDIRS) lsocket.o
+	$(CC) $(LDFLAGS) -o lsocket.so $(LIBDIRS) lsocket.o
 
 lsocket.o: lsocket.c
-	gcc $(CFLAGS) $(INCDIRS) -c lsocket.c -o lsocket.o
+	$(CC) $(CFLAGS) $(INCDIRS) -c lsocket.c -o lsocket.o
 
 clean:
 	find . -name "*~" -exec rm {} \;

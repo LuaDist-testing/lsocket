@@ -21,6 +21,14 @@ if not client then
 	os.exit(1)
 end
 
+-- wait for connect() to succeed or fail
+ls.select(nil, {client})
+ok, err = client:status()
+if not ok then
+	print("error: "..err)
+	os.exit(1)
+end
+
 print "Socket info:"
 for k, v in pairs(client:info()) do
 	io.write(k..": "..tostring(v)..", ")

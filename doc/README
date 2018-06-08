@@ -12,10 +12,11 @@ Introduction
    lsocket provides not complete, but good enough support for socket
    programming. It supports IPv4 and IPv6, and selects automatically which
    one to use based on the address you bind or connect to. Also, it is
-   almost- nonblocking: except for lsocket.select() and lsocket.connect(),
-   nothing ever blocks ([1]*). And you can also make lsocket.select()
-   nonblocking by passing 0 as a timeout value. lsocket has been tested
-   with lua 5.1.5, 5.2.1 and luajit 2.0.1 on Linux and Mac OS X.
+   almost- nonblocking: except for lsocket.select() and nameserver
+   lookups, nothing ever blocks ([1]*). And you can also make
+   lsocket.select() nonblocking by passing 0 as a timeout value. lsocket
+   has been tested with lua 5.1.5, 5.2.1 and luajit 2.0.1 on Linux and Mac
+   OS X.
 
 Installing
 
@@ -88,7 +89,16 @@ Using
 
     Returns
 
-          the connected socket, or nil+error message on error.
+          the socket in connecting state, or nil+error message on error.
+          Note that you need to select() the socket for writing to wait
+          for the connect to finish. Of course you can also select the
+          socket for reading, but if you select for writing, select() will
+          return as soon as the socket is connected, whereas if you select
+          for reading, select() will return when the socket is connected
+          and the server has sent data. In any case select() will return
+          if the connection fails. You should call status() on a socket
+          that was created by connect() after it is first returned from
+          select() in order to see whether the connection was successful.
 
   Socket Methods
 
@@ -105,7 +115,8 @@ Using
 
           a table with the requested information:
 
-          + If what is none or nil, return a standard set of socket infos.
+          + If what is omitted or nil, return a standard set of socket
+            infos.
             These fields are in the table:
 
               fd
@@ -139,6 +150,13 @@ Using
 
           + If what is "socket", return information about the local
             socket. Fields as for "peer"
+
+   ok, err = socket:status()
+          check a sockets error status.
+
+    Returns
+
+          true if the socket has no errors, nil + error message otherwise.
 
    sock, ip, port = socket:accept()
           accept a new connection on a socket

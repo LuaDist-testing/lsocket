@@ -59,6 +59,15 @@
 		- nreqs			number of requests served
 		- up_since		date and time when the server has been started
 
+	-- handling keepalive connections
+	
+	Connections are persistent (keep-alive) if requested by the client or
+	if the http version is 1.1 or more and the client does not forbid them
+	by requesting Connection: Close. The life time of a keepalive connection
+	can be set by setting server.keepalive to a value in seconds, default
+	is 10. If you do not want to support persistent connections, set
+	server.keepalive to false.
+
 	-- Notes:
 	
 	As reads and writes in lsocket are non-blocking, and the data may not
@@ -84,6 +93,7 @@ local match = string.match
 local lower = string.lower
 local yield = coroutine.yield
 local date = os.date
+local time = os.time
 local remove = table.remove
 
 local http_status_msg = {
@@ -129,20 +139,21 @@ local http_status_msg = {
 	["505"] = "HTTP Version not supported",
 }
 
--- insert socket into appropriate table and then return to main loop.
--- It will resume here when the socket becomes ready for the operation
--- we want to perform
-function waitfor(self, what, sock)
-	local tbl = self[what]
+-- add socket to a waiting queue
+local function add_to_queue(tbl, sock)
 	local tid = #tbl + 1
 	tbl[tid] = sock
-	self.requests[sock] = coroutine.running()
-	coroutine.yield()
-	self.requests[sock] = nil
-	-- the sockets index in the queue may have been moved down by other
-	-- remove()s, so we search backwards from the old position - or the
-	-- current table length, whichever is smaller.
-	tid = tid < #tbl and tid or #tbl
+	return tid
+end
+
+-- remove socket from a waiting queue
+-- the sockets index in the queue may have been moved down by other
+-- remove()s, so we search backwards from the old position - or the
+-- current table length, whichever is smaller.
+local function remove_from_queue(tbl, sock, tid)
+	local ts = #tbl
+	tid = tid or ts
+	tid = tid < ts and tid or ts
 	while tid > 0 do
 		if tbl[tid] == sock then
 			remove(tbl, tid)
@@ -150,6 +161,18 @@ function waitfor(self, what, sock)
 		end
 		tid = tid - 1
 	end
+end
+
+-- insert socket into appropriate table and then return to main loop.
+-- It will resume here when the socket becomes ready for the operation
+-- we want to perform
+function waitfor(self, what, sock)
+	local tbl = self[what]
+	local tid = add_to_queue(tbl, sock)
+	self.requests[sock] = coroutine.running()
+	coroutine.yield()
+	self.requests[sock] = nil
+	remove_from_queue(tbl, sock, tid)
 end
 
 -- wrappers around socket:recv and socket:send that wrap the concurrency
@@ -259,6 +282,8 @@ local function process_request(self, sock)
 	-- read request data
 	local rq, headers, body = read_request(self, sock)
 	local ok, status, res, hdr, answer, smsg, k, v
+	local keepalive = false
+	local conn = lower(headers.connection)
 
 	-- check whether we can process the request. If so, call the handler
 	if rq.httpver < 1.0 or rq.httpver > 1.1 then
@@ -269,6 +294,11 @@ local function process_request(self, sock)
 			ok, status, res, hdr = pcall(self.process[lower(rq.method)], rq, headers, body)
 		end
 		
+		if self.keepalive and (conn == 'keep-alive' or
+			(rq.httpver >= 1.1 and conn ~= 'close')) then
+			keepalive = true
+		end
+		
 		-- check return status
 		if ok then
 			res = res or "(no data)"
@@ -277,9 +307,11 @@ local function process_request(self, sock)
 			res = "<html><head>Error</head><body><h1>Internal Error</h1>"
 			res = res .. "<p>" .. status .. "</p></body></html>"
 			status = "500"
+			keepalive = false
 		else
 			res = "<html><head>Error</head><body><h1>Not Implemented</h1></body></html>"
 			status = "501"
+			keepalive = false
 		end
 	end
 
@@ -290,6 +322,12 @@ local function process_request(self, sock)
 	answer = "HTTP/" .. rq.httpver .. " " .. status .. " " .. smesg .. "\r\n"
 	answer = answer .. "Content-Type: text/html\r\n"
 	answer = answer .. "Content-Length: " .. tostring(#res) .. "\r\n"
+
+	if keepalive then
+		answer = answer .. "Connection: Keep-Alive\r\n"
+		answer = answer .. "Keep-Alive: timeout=" .. self.keepalive .. "\r\n"
+	end
+
 	if hdr then
 		for k, v in pairs(hdr) do
 			answer = answer .. k .. ": " .. tostring(v) .. "\r\n"
@@ -304,7 +342,12 @@ local function process_request(self, sock)
 		sent = sent + send_data(self, sock, sub(answer, sent + 1, -1))
 	until sent == tosend
 	
-	sock:close()
+	if keepalive then
+		self.stillalive[sock] = time() + self.keepalive
+		add_to_queue(self.rsocks, sock)
+	else
+		sock:close()
+	end
 	self.nreqs = self.nreqs + 1
 	
 	return true
@@ -357,8 +400,10 @@ function httpd.new(addr, port, backlog, logfn)
 	self.rsocks = { self.socket }
 	self.wsocks = {}
 	self.requests = {}
+	self.stillalive = {}
+	self.keepalive = 10 -- seconds
 	self.logfn = logfn
-	self.started = os.time()
+	self.started = time()
 	self.nreqs = 0
 
 	-- dummy handler
@@ -408,22 +453,39 @@ end
 -- returns true if sockets were handled, false if select() timed out.
 function httpd_methods:step(tmout)
 	local server = self.socket
-	local _, s
+	local _, s, t
 	local rr, rw = ls.select(self.rsocks, self.wsocks, tmout)
 
+	-- handle sockets from the read queue: they may be either new connections,
+	-- reused keep-alive connections or running requests
 	if rr then
 		for _, s in ipairs(rr) do
 			if s == server then
 				local s1, ip, port = s:accept()
 				begin_request(self, s1)
+			elseif self.stillalive[s] then
+				self.stillalive[s] = nil
+				remove_from_queue(self.rsocks, s)
+				begin_request(self, s)
 			else
 				continue_request(self, s)
 			end
 		end
 	end
+	
+	-- handle sockets from write queue: these can only be running requests
 	if rw then
 		for _, s in ipairs(rw) do
 			continue_request(self, s)
+		end
+	end
+	
+	-- clean up timed out keepalive connections
+	local tm = time()
+	for s, t in pairs(self.stillalive) do
+		if t <= tm then
+			self.stillalive[s] = nil
+			s:close()
 		end
 	end
 	

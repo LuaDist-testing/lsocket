@@ -58,5 +58,5 @@ end)
 local doomsday = false
 
 repeat
-	server:step()
+	server:step(0.1)
 until doomsday
