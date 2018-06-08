@@ -10,30 +10,63 @@ endif
 
 OS = $(shell uname -s)
 
-CC=gcc
-CFLAGS=-Wall -fPIC $(OPT) $(DBG)
-INCDIRS=-I/usr/local/include
-LIBDIRS=-L/usr/local/lib
-LDFLAGS=-shared $(DBG)
+# if this does not work, just set it to your version number
+LUA_VERSION=$(shell lua -e "print((string.gsub(_VERSION, '^.+ ', '')))")
 
-# OS specialities
-ifeq ($(OS),Darwin)
-	CC=cc
-	LDFLAGS=-bundle -undefined dynamic_lookup -all_load
+LUA_DIR = /usr/local
+LUA_LIBDIR=$(LUA_DIR)/lib/lua/$(LUA_VERSION)
+LUA_SHAREDIR=$(LUA_DIR)/share/lua/$(LUA_VERSION)
+LUA_INCLUDE=$(LUA_DIR)/include
+
+ifndef LIBFLAG
+	ifeq ($(OS),Darwin)
+		LIBFLAG=-bundle -undefined dynamic_lookup -all_load
+	else
+		LIBFLAG=-shared
+	endif
 endif
+
+ifndef PTHRFLAG
+	PTHRFLAG=-pthread
+endif
+
+ifndef CC
+	CC=gcc
+endif
+
+CFLAGS=-Wall -fPIC $(OPT) $(DBG)
+INCDIRS=-I$(LUA_INCLUDE)
+LDFLAGS=$(LIBFLAG) $(DBG)
 
 all: lsocket.so
 
 debug:; make DEBUG=1
 
+install:	all
+	mkdir -p $(LUA_LIBDIR)
+	cp lsocket.so $(LUA_LIBDIR)
+
+install-aresolver:	async_resolver.so
+	mkdir -p $(LUA_LIBDIR)
+	cp async_resolver.so $(LUA_LIBDIR)
+
 lsocket.so: lsocket.o
-	$(CC) $(LDFLAGS) -o lsocket.so $(LIBDIRS) lsocket.o
+	$(CC) $(LDFLAGS) -o $@ $<
+
+async_resolver.so: async_resolver.o gai_async.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(PTHRFLAG)
 
 lsocket.o: lsocket.c
-	$(CC) $(CFLAGS) $(INCDIRS) -c lsocket.c -o lsocket.o
+	$(CC) $(CFLAGS) $(INCDIRS) -c $< -o $@
+
+async_resolver.o: async_resolver.c gai_async.h
+	$(CC) $(CFLAGS) $(INCDIRS) -c $< -o $@
+
+gai_async.o: gai_async.c gai_async.h
+	$(CC) $(CFLAGS) $(INCDIRS) -c $< -o $@ $(PTHRFLAG)
 
 clean:
 	find . -name "*~" -exec rm {} \;
 	find . -name .DS_Store -exec rm {} \;
 	find . -name ._* -exec rm {} \;
-	rm -f *.o *.so core
+	rm -f *.o *.so core samples/testsocket

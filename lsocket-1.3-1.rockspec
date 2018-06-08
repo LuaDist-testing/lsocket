@@ -1,15 +1,15 @@
 -- This file was automatically generated for the LuaDist project.
 
 package = "lsocket"
-version = "1.1-1"
+version = "1.3-1"
 -- LuaDist source
 source = {
-  tag = "1.1-1",
+  tag = "1.3-1",
   url = "git://github.com/LuaDist-testing/lsocket.git"
 }
 -- Original source
 -- source = {
--- 	url = "http://www.tset.de/downloads/lsocket-1.1-1.tar.gz"
+-- 	url = "http://www.tset.de/downloads/lsocket-1.3-1.tar.gz"
 -- }
 description = {
 	summary = "simple and easy socket support for lua.",
@@ -21,7 +21,7 @@ description = {
 		IPv6 multicasts.
 	]],
 	homepage = "http://www.tset.de/lsocket/",
-	license = "MIT/X11",
+	license = "MIT",
 	maintainer = "Gunnar Zötl <gz@tset.de>"
 }
 supported_platforms = {

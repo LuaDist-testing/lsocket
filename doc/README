@@ -4,19 +4,19 @@ lsocket
 
    A library that provides network programming support for Lua.
 
-   Author: Gunnar Zötl , 2013.
+   Author: Gunnar Zötl , 2013-2014.
    Released under MIT/X11 license. See file LICENSE for details.
 
 Introduction
 
    lsocket provides not complete, but good enough support for socket
-   programming. It supports IPv4 and IPv6, and selects automatically which
-   one to use based on the address you bind or connect to. Also, it is
-   almost- nonblocking: except for lsocket.select() and nameserver
-   lookups, nothing ever blocks ([1]*). And you can also make
-   lsocket.select() nonblocking by passing 0 as a timeout value. lsocket
-   has been tested with lua 5.1.5, 5.2.1 and luajit 2.0.1 on Linux and Mac
-   OS X.
+   programming. It supports IPv4, IPv6 and unix domain sockets, and
+   selects automatically which one to use based on the address you bind or
+   connect to. Also, it is almost-nonblocking: except for lsocket.select()
+   and nameserver lookups, nothing ever blocks ([1]*). And you can also
+   make lsocket.select() nonblocking by passing 0 as a timeout value.
+   lsocket has been tested with lua 5.1.5, 5.2.3 and luajit 2.0.1 on Linux
+   and Mac OS X.
 
 Installing
 
@@ -38,7 +38,7 @@ Using
 
   Constructors
 
-   socket = lsocket.bind( [type], [address], port, [backlog] )
+   socket = lsocket.bind( [type], [address], [port], [backlog] )
           creates a new socket and binds it locally.
 
     Arguments
@@ -48,14 +48,22 @@ Using
                 or "mcast", defaults to "tcp". If the type is mcast, the
                 socket will be a udp socket that is additionally set up
                 for use as a ipv4 broadcast or ipv6 multicast client
-                socket.
+                socket. mcast is not available for unix domain sockets.
 
         address
                 (optional) ip address or hostname to bind to, defaults to
-                lsocket.INADDR_ANY ('0.0.0.0').
+                lsocket.INADDR_ANY ('0.0.0.0'). If this is an IPv4
+                address, the socket will be an IP socket, if it is an IPv6
+                address, the socket will be an IPv6 socket, and if it
+                contains a slash (/) character, it will be a unix domain
+                socket with the address as the path on the file system. On
+                linux, if the first char is '@', then it will be a unix
+                domain socket with an abstract socket name, i.e. one that
+                does not exist in the file system.
 
         port
-                port number to bind to
+                port number to bind to, meaningless with unix domain
+                sockets.
 
         backlog
                 (optional) length of connection backlog on this socket,
@@ -75,13 +83,15 @@ Using
                 or "mcast", defaults to "tcp". If the type is mcast, the
                 socket will be a udp socket that is additionally set up
                 for use as a ipv4 broadcast or ipv6 multicast server
-                socket.
+                socket. mcast is not available for unix domain sockets.
 
         address
-                ip address or hostname to connect to
+                ip address or hostname to connect to. See the address
+                parameter to bind() above for a more detailed explanation.
 
         port
-                port number to connect to
+                port number to connect to, meaningless with unix domain
+                sockets.
 
         ttl
                 (optional) ttl for multicast packets, defaults to 1. Only
@@ -134,7 +144,7 @@ Using
 
               multicast
                       true if the socket is a multicast socket, false
-                      otherwise
+                      otherwise.
 
           + If what is "peer", return information about the socket peer.
             These fields are in the table:
@@ -148,8 +158,12 @@ Using
               port
                       port number
 
+            If called on unix domain sockets, this will only return useful
+            information for sockets created with lsocket.bind().
           + If what is "socket", return information about the local
-            socket. Fields as for "peer"
+            socket. Fields as for "peer". If called on unix domain
+            sockets, this will only return useful information for sockets
+            created with lsocket.connect().
 
    ok, err = socket:status()
           check a sockets error status.
@@ -158,14 +172,33 @@ Using
 
           true if the socket has no errors, nil + error message otherwise.
 
-   sock, ip, port = socket:accept()
+   fd = socket:getfd()
+          returns a socket file descriptor. You probably don't need this,
+          it is only for interaction with other packages.
+
+    Returns
+
+          the sockets file descriptor.
+
+   ok, err = socket.setfd(newfd)
+          sets a sockets file descriptor. Only -1 (incalid descriptor) is
+          allowed as argument. You probably don't need this, it is only
+          for interaction with other packages.
+
+    Returns
+
+          true if the descriptor was -1 and the sockets descriptor has
+          been set to -1, nil + error message otherwise.
+
+   sock, addr, port = socket:accept()
           accept a new connection on a socket
 
     Returns
 
           a new socket with the accepted connection and ip address and
           port of the remote end on success, false if no connection is
-          available to accept, or nil+error message on error.
+          available to accept, or nil+error message on error. If called
+          with a unix domain socket, addr and port will be nil on success.
 
           This only works on tcp type sockets.
 
@@ -258,7 +291,7 @@ Using
   Functions
 
    [read [, write]] = lsocket.select([read [, write]] , [timeout] )
-          calls select() on up to 3 tables of sockets, has timeout
+          calls select() on up to 2 tables of sockets, has timeout
 
     Arguments
 
@@ -332,6 +365,9 @@ Using
         addr
                 the ip address
 
+        mask
+                the netmask
+
           On error, returns nil + error message.
 
   Constants
@@ -358,10 +394,10 @@ Footnotes
    [2](*) The functions connect, bind, resolve and the method sendto
    transparently use name service resolution, which may block, if a name
    server is not available or slow to respond. However, name service
-   resolution is not used if you pass an IP address (IPv4 or IPv6) as
-   address argument to those functions.
+   resolution is not used if you pass an IP address (IPv4 or IPv6) or a
+   path (unix domain) as address argument to those functions.
 
-References
+Verweise
 
-   1. file://localhost/home/u871670/stuff/lsocket/html/README.html#fn1
-   2. file://localhost/home/u871670/stuff/lsocket/html/README.html#r_fn1
+   1. file:///home/gunnar/stuff/lsocket/html/README.html#fn1
+   2. file:///home/gunnar/stuff/lsocket/html/README.html#r_fn1
