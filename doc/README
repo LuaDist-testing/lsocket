@@ -12,10 +12,10 @@ Introduction
    lsocket provides not complete, but good enough support for socket
    programming. It supports IPv4 and IPv6, and selects automatically which
    one to use based on the address you bind or connect to. Also, it is
-   almost- nonblocking: except for lsocket.select(), nothing ever blocks
-   ([1]*). And you can also make lsocket.select() nonblocking by passing 0
-   as a timeout value. lsocket has been tested with lua 5.1.5, 5.2.1 and
-   luajit 2.0.1 on Linux and Mac OS X.
+   almost- nonblocking: except for lsocket.select() and lsocket.connect(),
+   nothing ever blocks ([1]*). And you can also make lsocket.select()
+   nonblocking by passing 0 as a timeout value. lsocket has been tested
+   with lua 5.1.5, 5.2.1 and luajit 2.0.1 on Linux and Mac OS X.
 
 Installing
 
@@ -258,8 +258,10 @@ Using
           tables must be given. That means, if you want to wait on sockets
           for writing, you will also have to pass a table or nil for
           reading. The timeout value can be specified without passing any
-          or all tables before it, so that lsocket.select(timeout) can be
-          used as a millisecond precision sleep function.
+          tables before it, so that lsocket.select(timeout) can be used as
+          a millisecond precision sleep function. Closed sockets are
+          ignored by lsocket.select(), and it is an error to call
+          lsocket.select() without any open sockets and timeout.
 
     Returns
 
@@ -320,8 +322,11 @@ Using
           IPv4 "any" address, i.e. what you bind to if you intend to
           accept connections on all addresses your computer has.
 
-   lsocket.IN6ADDR_ANY IPv6
-          "any" address, see lsocket.INADDR_ANY.
+   lsocket.IN6ADDR_ANY
+          IPv6 "any" address, see lsocket.INADDR_ANY.
+
+   lsocket._VERSION
+          Version number of the lsocket module.
 
 Examples
 
@@ -340,5 +345,5 @@ Footnotes
 
 References
 
-   1. file://localhost/home/u871670/tmp/lsocket/README.html#fn1
-   2. file://localhost/home/u871670/tmp/lsocket/README.html#r_fn1
+   1. file://localhost/home/u871670/stuff/lsocket/html/README.html#fn1
+   2. file://localhost/home/u871670/stuff/lsocket/html/README.html#r_fn1

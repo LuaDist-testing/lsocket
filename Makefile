@@ -9,6 +9,7 @@ else
 endif
 
 OS = $(shell uname -s)
+
 CFLAGS=-Wall -fPIC $(OPT) $(DBG)
 INCDIRS=-I/usr/local/include
 LIBDIRS=-L/usr/local/lib
@@ -31,9 +32,6 @@ lsocket.o: lsocket.c
 
 clean:
 	find . -name "*~" -exec rm {} \;
+	find . -name .DS_Store -exec rm {} \;
+	find . -name ._* -exec rm {} \;
 	rm -f *.o *.so core
-	for dir in . doc samples;\
-	do \
-		rm -f $dir/.DS_Store; \
-		rm -f $dir/._*; \
-	done

@@ -23,8 +23,14 @@
 #include <dirent.h>
 #include <ifaddrs.h>
 
+#ifndef IPV6_ADD_MEMBERSHIP
+	#define IPV6_ADD_MEMBERSHIP IPV6_JOIN_GROUP
+#endif
+
 #include "lua.h"
 #include "lauxlib.h"
+
+#define LSOCKET_VERSION "1.0-2"
 
 #define LSOCKET "socket"
 #define TOSTRING_BUFSIZ 64
@@ -42,24 +48,8 @@
 
 /* this may need a little more sophistication, but seems to work ok */
 #if LUA_VERSION_NUM == 501
-
-#define LUA_INIT_LIB(funcs) \
-	lua_newtable(L); \
-	luaL_register(L, NULL, funcs)
-
-#define lsocket_register(L, funcs) luaL_register(L, NULL, funcs)
-
-#elif LUA_VERSION_NUM >= 502
-
-#define LUA_INIT_LIB(funcs) \
-	luaL_newlib(L, funcs)
-
-#define lsocket_register(L, funcs) luaL_setfuncs(L, funcs, 0)
-
-#define lua_objlen(L, idx) lua_rawlen(L, idx)
-
-#else
-	#error lua version not supported.
+#define luaL_newlib(L,funcs) lua_newtable(L); luaL_register(L, NULL, funcs)
+#define luaL_setfuncs(L,funcs,x) luaL_register(L, NULL, funcs)
 #endif
 
 /*** Userdata handling ***/
@@ -293,13 +283,20 @@ static uint16_t _portnumber(struct sockaddr *sa)
  * Returns:
  * 	1 if the address consists only of chars that make up a valid ip(v4
  * 	or v6) address, 0 otherwise.
+ * 
+ * Note: this does not check whether the address is a valid ip address,
+ * just whether it consists of chars that make up one.
  */
-static int needsnolookup(const char *addr)
+static int _needsnolookup(const char *addr)
 {
 	int len = strlen(addr);
 	int pfx = strspn(addr, "0123456789.");
-	if (pfx != len)
+	if (pfx != len) {
 		pfx = strspn(addr, "0123456789abcdefABCDEF:");
+		/* last 2 words may be in dot notation */
+		if (addr[pfx] == '.')
+			pfx += strspn(addr + pfx, "0123456789.");
+	}
 	return pfx == len;
 }
 
@@ -329,7 +326,7 @@ static int _gethostaddr(lua_State *L, const char *addr, int type, int port, int 
 	memset(&hint, 0, sizeof(hint));
 	hint.ai_family = AF_UNSPEC;
 	hint.ai_socktype = type;
-	if (needsnolookup(addr))
+	if (_needsnolookup(addr))
 		hint.ai_flags = AI_NUMERICHOST;
 
 	int err = getaddrinfo(addr, 0, &hint, &info);
@@ -824,9 +821,8 @@ static int lsocket_sock_recvfrom(lua_State *L)
 static int lsocket_sock_send(lua_State *L)
 {
 	lSocket *sock = lsocket_checklSocket(L, 1);
-
-	const char *data = luaL_checkstring(L, 2);
-	int len = lua_objlen(L, 2);
+	size_t len;
+	const char *data = luaL_checklstring(L, 2, &len);
 	
 	int nwr = send(sock->sockfd, data, len, MSG_DONTWAIT);
 	
@@ -861,8 +857,8 @@ static int lsocket_sock_send(lua_State *L)
 static int lsocket_sock_sendto(lua_State *L)
 {
 	lSocket *sock = lsocket_checklSocket(L, 1);
-	const char *data = luaL_checkstring(L, 2);
-	int len = lua_objlen(L, 2);
+	size_t len;
+	const char *data = luaL_checklstring(L, 2, &len);
 	const char *addr = luaL_checkstring(L, 3);
 	int port = luaL_checknumber(L, 4);
 	char sabuf[sizeof(struct sockaddr_in6)];
@@ -942,18 +938,21 @@ static const struct luaL_Reg lSocket_methods [] ={
  * 	s	fd_set to fill
  * 
  * Returns:
- * 	the largest fd number found in the table
+ * 	the largest fd number found in the table, or -1 if there is nothing
+ *  in the table
  */
 static int _table2fd_set(lua_State *L, int idx, fd_set *s)
 {
 	int i = 1;
-	int maxfd = 0;
+	int maxfd = -1;
 	lua_rawgeti(L, idx, i++);
 	while (lsocket_islSocket(L, -1)) {
 		lSocket *sock = lsocket_checklSocket(L, -1);
-		FD_SET(sock->sockfd, s);
+		if (sock->sockfd >= 0) {
+			FD_SET(sock->sockfd, s);
+			if (sock->sockfd > maxfd) maxfd = sock->sockfd;
+		}
 		lua_pop(L, 1);
-		if (sock->sockfd > maxfd) maxfd = sock->sockfd;
 		lua_rawgeti(L, idx, i++);
 	}
 
@@ -1054,7 +1053,7 @@ static int lsocket_select(lua_State *L)
 	double timeo = 0;
 	struct timeval timeout, *timeop = &timeout;
 	int top = 1;
-	int maxfd = 0, mfd;
+	int maxfd = -1, mfd;
 	int nargs = lua_gettop(L);
 	
 	FD_ZERO(&readfd);
@@ -1075,6 +1074,7 @@ static int lsocket_select(lua_State *L)
 
 	timeo = luaL_optnumber(L, top, -1);
 	
+	if (maxfd < 0 && timeo == -1) return lsocket_error(L, "no open sockets to check and no timeout set");
 	if (top < nargs) luaL_error(L, "bad argument to 'select' (invalid option)");
 	
 	if (timeo < 0) {
@@ -1105,7 +1105,7 @@ static int lsocket_select(lua_State *L)
 		_fd_set2table(L, 2, &writefd, maxfd);
 		nret = 2;
 	}
-
+	
 	return nret;
 }
 
@@ -1130,7 +1130,7 @@ static int lsocket_resolve(lua_State *L)
 	struct addrinfo hint, *info =0;
 	memset(&hint, 0, sizeof(hint));
 	hint.ai_family = AF_UNSPEC;
-	if (needsnolookup(name))
+	if (_needsnolookup(name))
 		hint.ai_flags = AI_NUMERICHOST;
 
 	int err = getaddrinfo(name, 0, &hint, &info);
@@ -1243,7 +1243,7 @@ static int lsocket_ignore(lua_State *L)
  */
 int luaopen_lsocket(lua_State *L)
 {
-	LUA_INIT_LIB(lsocket);
+	luaL_newlib(L, lsocket);
 
 	/* add constants */
 	lua_pushliteral(L, "INADDR_ANY");
@@ -1254,12 +1254,16 @@ int luaopen_lsocket(lua_State *L)
 	lua_pushliteral(L, "::0");
 	lua_rawset(L, -3);
 
+	lua_pushliteral(L, "_VERSION");
+	lua_pushliteral(L, LSOCKET_VERSION);
+	lua_rawset(L, -3);
+
 	/* add lSocket userdata metatable */
 	luaL_newmetatable(L, LSOCKET);
-	lsocket_register(L, lSocket_meta);
+	luaL_setfuncs(L, lSocket_meta, 0);
 	/* methods */
 	lua_pushliteral(L, "__index");
-	LUA_INIT_LIB(lSocket_methods);
+	luaL_newlib(L, lSocket_methods);
 	lua_rawset(L, -3);
 	/* type */
 	lua_pushliteral(L, "__type");
