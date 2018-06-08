@@ -2,6 +2,9 @@
 -- and prints what it receives.
 -- Demonstrates how to set up a multicast client socket and read data
 -- from it.
+--
+-- Gunnar Zötl <gz@tset.de>, 2013-03
+-- Do what you will with this.
 
 if arg[1] == '6' then
 	addr = 'ff01::1'

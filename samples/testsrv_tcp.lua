@@ -2,6 +2,9 @@
 -- Demonstrates how to set up a tcp server socket, how to accept connections,
 -- how to maintain multiple connections in parallel, and how to determine
 -- whether a client has disconnected.
+--
+-- Gunnar Zötl <gz@tset.de>, 2013-03
+-- Do what you will with this.
 
 if arg[1] == '6' then
 	addr = '::1'

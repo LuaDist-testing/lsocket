@@ -1,15 +1,15 @@
 -- This file was automatically generated for the LuaDist project.
 
 package = "lsocket"
-version = "1.0.1-1"
+version = "1.0.2-1"
 -- LuaDist source
 source = {
-  tag = "1.0.1-1",
+  tag = "1.0.2-1",
   url = "git://github.com/LuaDist-testing/lsocket.git"
 }
 -- Original source
 -- source = {
--- 	url = "http://www.tset.de/downloads/lsocket-1.0.1-1.tar.gz"
+-- 	url = "http://www.tset.de/downloads/lsocket-1.0.2-1.tar.gz"
 -- }
 description = {
 	summary = "simple and easy socket support for lua.",
@@ -25,7 +25,7 @@ description = {
 	maintainer = "Gunnar Zötl <gz@tset.de>"
 }
 supported_platforms = {
-	"unix", "macosx"
+	"unix"
 }
 dependencies = {
 	"lua >= 5.1"

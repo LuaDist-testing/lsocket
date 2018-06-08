@@ -2,6 +2,9 @@
 -- you type and prints what you receive.
 -- Demonstrates how to set up a udp client socket and communicate through
 -- it.
+--
+-- Gunnar Zötl <gz@tset.de>, 2013-03
+-- Do what you will with this.
 
 if arg[1] == '6' then
 	addr = '::1'

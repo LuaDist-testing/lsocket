@@ -30,7 +30,7 @@
 #include "lua.h"
 #include "lauxlib.h"
 
-#define LSOCKET_VERSION "1.0-2"
+#define LSOCKET_VERSION "1.0.2"
 
 #define LSOCKET "socket"
 #define TOSTRING_BUFSIZ 64

@@ -1,6 +1,9 @@
 -- very simple udp test server that just echoes what it gets from the clients.
 -- Demonstrates how to set up a udp server socket, how to accept connections,
 -- and how to maintain multiple connections in parallel.
+--
+-- Gunnar Zötl <gz@tset.de>, 2013-03
+-- Do what you will with this.
 
 if arg[1] == '6' then
 	addr = '::1'

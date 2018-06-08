@@ -1,6 +1,9 @@
 -- very simple multicast test server that just broadcasts a counter.
 -- Demonstrates how to set up a multicast server socket, and how to send
 -- data to it.
+--
+-- Gunnar Zötl <gz@tset.de>, 2013-03
+-- Do what you will with this.
 
 if arg[1] == '6' then
 	addr = 'ff01::1'
